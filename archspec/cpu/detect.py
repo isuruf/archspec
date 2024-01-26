@@ -83,6 +83,11 @@ def _check_output(args, env):
     return str(output.decode("utf-8"))
 
 
+WINDOWS_MAPPING = {
+    "AMD64": "x86_64",
+    "ARM64": "aarch64",
+}
+
 def _machine():
     """ "Return the machine architecture we are on"""
     operating_system = platform.system()
@@ -90,6 +95,11 @@ def _machine():
     # If we are not on Darwin, trust what Python tells us
     if operating_system not in ("Darwin", "Windows"):
         return platform.machine()
+
+    # Normalize windows specific names
+    if operating_system == "Windows":
+        platform_machine = platform.machine()
+        return WINDOWS_MAPPING.get(platform_machine, platform_machine)
 
     if operating_system == "Darwin":
         # On Darwin it might happen that we are on M1, but using an interpreter
@@ -150,6 +160,30 @@ def wmic_cpuinfo():
     for swap in swaps:
         if swap[0] in win_info:
             info[swap[1]] = win_info[swap[0]]
+
+    flags = ''
+
+    if platform.machine() == "AMD64":
+        import ctypes.wintypes
+
+        # https://learn.microsoft.com/en-us/windows/win32/api/processthreadsapi/nf-processthreadsapi-isprocessorfeaturepresent
+        IsProcessorFeaturePresent = ctypes.windll.kernel32.IsProcessorFeaturePresent
+        IsProcessorFeaturePresent.argtypes = [ctypes.wintypes.DWORD]
+        IsProcessorFeaturePresent.restype = ctypes.c_bool
+
+        PF_SSE4_2_INSTRUCTIONS_AVAILABLE = 38
+        PF_AVX2_INSTRUCTIONS_AVAILABLE = 40
+
+        if IsProcessorFeaturePresent(PF_AVX2_INSTRUCTIONS_AVAILABLE):
+            # Assume that AVX2 presence indicates x86_64_v3
+            flags = " ".join(TARGETS["x86_64_v3"].features)
+        elif IsProcessorFeaturePresent(PF_SSE4_2_INSTRUCTIONS_AVAILABLE):
+            # Assume that SSE4.2 presence indicates x86_64_v3
+            flags = " ".join(TARGETS["x86_64_v2"].features)
+        else:
+            flags = " ".join(TARGETS["x86_64"].features)
+
+    info["flags"] = flags
 
     return info
 
